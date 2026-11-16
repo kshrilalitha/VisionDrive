@@ -17,7 +17,9 @@ from backend.risk_scoring import RiskScorer
 from backend.database import (
     create_session,
     save_monitoring_result,
-    end_session
+    end_session,
+    save_alert,
+    get_alerts
 )
 
 app = FastAPI(
@@ -73,6 +75,15 @@ def get_sessions():
         "total_sessions": len(result),
         "sessions": result
     }
+
+@app.get("/alerts")
+def get_all_alerts():
+    return get_alerts()
+
+
+@app.get("/alerts/{session_id}")
+def get_session_alerts(session_id: str):
+    return get_alerts(session_id)
 
 
 # Get a particular monitoring session
@@ -157,7 +168,8 @@ async def monitor(websocket: WebSocket):
         phone_detector = PhoneDetector()
 
         risk_scorer = RiskScorer()
-        active_alert_types = set()
+        # Track alerts for database storage only
+        saved_active_alerts = set()
 
         # Create a MongoDB monitoring session
         session_id = create_session()
@@ -200,26 +212,27 @@ async def monitor(websocket: WebSocket):
             )
 
             # Generate all current alerts
-            current_alerts = generate_alerts(
+            alerts = generate_alerts(
                 fatigue_output,
                 head_output,
                 phone_output,
                 risk_output
             )
 
-# Identify currently active alert types
+            # Store each newly activated alert once per session
             current_alert_types = {
-                alert["type"] for alert in current_alerts
+                alert["type"] for alert in alerts
             }
 
-# Send only newly triggered alerts
-            new_alerts = [
-                alert for alert in current_alerts
-                if alert["type"] not in active_alert_types
+            new_alerts_for_storage = [
+                alert for alert in alerts
+                if alert["type"] not in saved_active_alerts
             ]
 
-# Update active alert tracking
-            active_alert_types = current_alert_types
+            for alert in new_alerts_for_storage:
+                save_alert(session_id, alert)
+
+            saved_active_alerts = current_alert_types
 
             # Save results in MongoDB
             save_monitoring_result(
@@ -236,8 +249,7 @@ async def monitor(websocket: WebSocket):
                 "distraction": head_output,
                 "phone": phone_output,
                 "risk": risk_output,
-                "alerts": new_alerts,
-                "active_alerts": current_alerts
+                "alerts": alerts
             })
 
     except WebSocketDisconnect:

@@ -13,7 +13,7 @@ client = MongoClient(
 
 database = client["visiondrive"]
 monitoring_collection = database["monitoring_sessions"]
-
+alerts_collection = database["alerts"]
 
 def test_connection():
     try:
@@ -93,3 +93,35 @@ def end_session(session_id):
             }
         }
     )
+
+def save_alert(session_id, alert):
+
+    alert_document = {
+        "session_id": ObjectId(session_id),
+        "type": alert["type"],
+        "severity": alert["severity"],
+        "message": alert["message"],
+        "timestamp": datetime.now(timezone.utc)
+    }
+
+    result = alerts_collection.insert_one(alert_document)
+
+    return str(result.inserted_id)
+    
+
+def get_alerts(session_id=None):
+    if session_id:
+        query = {"session_id": ObjectId(session_id)}
+    else:
+        query = {}
+
+    alerts = list(
+        alerts_collection.find(query).sort("timestamp", -1)
+    )
+
+    for alert in alerts:
+        alert["_id"] = str(alert["_id"])
+        alert["session_id"] = str(alert["session_id"])
+        alert["timestamp"] = alert["timestamp"].isoformat()
+
+    return alerts
